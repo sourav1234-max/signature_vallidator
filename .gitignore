@@ -1,0 +1,31 @@
+# Node & Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+*.log
+npm-debug.log*
+
+# Python & Virtual Envs
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+*.db
+*.sqlite3
+
+# Uploads & Temp files
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/signature_validator.db
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.gemini/

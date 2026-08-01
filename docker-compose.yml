@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./signature_validator.db
+      - SECRET_KEY=SUPER_SECRET_KEY_DIGITAL_SIGNATURE_VALIDATOR_2026_SECURE_DEV
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/signature_validator.db:/app/signature_validator.db
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+    depends_on:
+      - backend
