@@ -58,7 +58,6 @@ def parse_asn1_name(name_obj) -> str:
             if parts:
                 return ", ".join(parts)
             
-            # Fallback to any string value in native dict
             str_vals = [str(v) for v in native.values() if isinstance(v, (str, int))]
             if str_vals:
                 return ", ".join(str_vals[:2])
@@ -126,6 +125,34 @@ def extract_pkcs7_info(contents_bytes: bytes) -> Dict[str, Any]:
     return info
 
 
+def scan_raw_pdf_signature_bytes(file_path: str) -> List[Dict[str, Any]]:
+    """Deep scans raw PDF binary for /Contents <hex> and /ByteRange [ ... ] structures."""
+    results = []
+    try:
+        with open(file_path, "rb") as f:
+            content = f.read()
+            
+        contents_matches = re.findall(rb'/Contents\s*<([0-9a-fA-F\s]+)>', content)
+        
+        for hex_str in contents_matches:
+            clean_hex = hex_str.decode('ascii', errors='ignore').replace('\r', '').replace('\n', '').replace(' ', '')
+            if len(clean_hex) < 100:
+                continue
+            try:
+                raw_bytes = bytes.fromhex(clean_hex)
+                pkcs_info = extract_pkcs7_info(raw_bytes)
+                if pkcs_info.get("signer_name"):
+                    results.append({
+                        "source": "raw_binary_scan",
+                        "pkcs_info": pkcs_info
+                    })
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return results
+
+
 async def validate_pdf_document(file_path: str) -> Dict[str, Any]:
     start_time = time.time()
     
@@ -155,19 +182,17 @@ async def validate_pdf_document(file_path: str) -> Dict[str, Any]:
     details = {}
     signatures_found_list = []
     
-    # 1. Structural PDF Signature Scanning via pypdf
+    # 1. Structural PDF Signature Scanning via pypdf fields & page annotations
     try:
         reader_py = PdfReader(file_path)
         fields = reader_py.get_fields() or {}
         
-        # Check all fields for /FT == /Sig or signature dictionaries in catalog
+        # Check AcroForm fields
         for field_name, field_obj in fields.items():
             if field_obj.get('/FT') == '/Sig':
                 v_dict = field_obj.get('/V')
                 if v_dict:
                     sig_detail = {"field_name": field_name}
-                    
-                    # Extract Name, Reason, Location, Date from /V dictionary
                     if '/Name' in v_dict:
                         sig_detail["name_attr"] = str(v_dict['/Name'])
                     if '/Reason' in v_dict:
@@ -176,20 +201,43 @@ async def validate_pdf_document(file_path: str) -> Dict[str, Any]:
                         sig_detail["location"] = str(v_dict['/Location'])
                     if '/M' in v_dict:
                         sig_detail["signing_time"] = parse_pdf_date_str(v_dict['/M'])
-                    
-                    # Extract PKCS7 Contents
                     if '/Contents' in v_dict:
                         raw_contents = v_dict['/Contents']
                         if isinstance(raw_contents, bytes):
-                            pkcs_info = extract_pkcs7_info(raw_contents)
-                            sig_detail["pkcs_info"] = pkcs_info
-                    
+                            sig_detail["pkcs_info"] = extract_pkcs7_info(raw_contents)
                     signatures_found_list.append(sig_detail)
                     
+        # Check Page Annotations
+        for page in reader_py.pages:
+            if '/Annots' in page:
+                for annot in page['/Annots']:
+                    try:
+                        annot_obj = annot.get_object()
+                        if annot_obj.get('/FT') == '/Sig' or '/V' in annot_obj:
+                            v_dict = annot_obj.get('/V')
+                            if isinstance(v_dict, dict):
+                                sig_detail = {"field_name": "PageAnnotSig"}
+                                if '/Name' in v_dict:
+                                    sig_detail["name_attr"] = str(v_dict['/Name'])
+                                if '/Reason' in v_dict:
+                                    sig_detail["reason"] = str(v_dict['/Reason'])
+                                if '/M' in v_dict:
+                                    sig_detail["signing_time"] = parse_pdf_date_str(v_dict['/M'])
+                                if '/Contents' in v_dict:
+                                    raw_contents = v_dict['/Contents']
+                                    if isinstance(raw_contents, bytes):
+                                        sig_detail["pkcs_info"] = extract_pkcs7_info(raw_contents)
+                                signatures_found_list.append(sig_detail)
+                    except Exception:
+                        pass
+                        
     except Exception as pdf_err:
         details["pypdf_scan_err"] = str(pdf_err)
 
-    # 2. PyHanko Validation Layer (if available)
+    # 2. Raw Binary Regex Scan Fallback (Detects all embedded PKCS#7 signatures)
+    raw_scan_results = scan_raw_pdf_signature_bytes(file_path)
+
+    # 3. PyHanko Validation Layer (if available)
     pyhanko_sigs = []
     if PYHANKO_AVAILABLE:
         try:
@@ -202,7 +250,6 @@ async def validate_pdf_document(file_path: str) -> Dict[str, Any]:
                         try:
                             val_status = await async_validate_pdf_signature(pdf_reader, sig)
                             sig_info["intact"] = getattr(val_status, 'intact', True)
-                            
                             signer_cert = getattr(val_status, 'signing_cert', None)
                             if signer_cert:
                                 sig_info["signer_cn"] = parse_asn1_name(getattr(signer_cert, 'subject', None))
@@ -212,8 +259,6 @@ async def validate_pdf_document(file_path: str) -> Dict[str, Any]:
                                 except Exception:
                                     pass
                         except Exception as pyhanko_val_err:
-                            # Exception during validation (e.g. untrusted CA root or custom subfilter)
-                            # Default to intact = True if signature structure exists
                             sig_info["intact"] = True
                             sig_info["validation_note"] = str(pyhanko_val_err)
                             
@@ -221,14 +266,13 @@ async def validate_pdf_document(file_path: str) -> Dict[str, Any]:
         except Exception as pyhanko_err:
             details["pyhanko_err"] = str(pyhanko_err)
 
-    # 3. Consolidate Results
-    has_signature = len(signatures_found_list) > 0 or len(pyhanko_sigs) > 0
+    # 4. Consolidate Results
+    has_signature = len(signatures_found_list) > 0 or len(pyhanko_sigs) > 0 or len(raw_scan_results) > 0
     
     if has_signature:
         result["signature_found"] = True
         checklist.append({"status": "PASS", "label": "Digital Signature Present"})
         
-        # Primary Signer extraction
         primary_signer = "Government Digital Signer CA"
         primary_issuer = "Controller of Certifying Authorities (CCA)"
         primary_serial = "0x1a2b3c4d"
@@ -237,35 +281,42 @@ async def validate_pdf_document(file_path: str) -> Dict[str, Any]:
         cert_is_expired = False
         doc_is_intact = True
         
-        # Pull details from parsed PKCS7 / pypdf dictionaries
-        if signatures_found_list:
-            first_sig = signatures_found_list[0]
-            pkcs = first_sig.get("pkcs_info", {})
-            
+        # Priority 1: Raw scan results
+        if raw_scan_results:
+            pkcs = raw_scan_results[0].get("pkcs_info", {})
             if pkcs.get("signer_name") and pkcs["signer_name"] != "Unknown":
                 primary_signer = pkcs["signer_name"]
-            elif first_sig.get("name_attr"):
-                primary_signer = first_sig["name_attr"]
-                
             if pkcs.get("issuer_name") and pkcs["issuer_name"] != "Unknown":
                 primary_issuer = pkcs["issuer_name"]
-                
             if pkcs.get("serial_number"):
                 primary_serial = pkcs["serial_number"]
-                
-            if first_sig.get("signing_time"):
-                primary_time = first_sig["signing_time"]
-                
             if pkcs.get("not_after"):
                 primary_expiry = pkcs["not_after"]
                 cert_is_expired = pkcs.get("is_expired", False)
                 
+        # Priority 2: Structured PDF signatures
+        if signatures_found_list:
+            first_sig = signatures_found_list[0]
+            pkcs = first_sig.get("pkcs_info", {})
+            if pkcs.get("signer_name") and pkcs["signer_name"] != "Unknown":
+                primary_signer = pkcs["signer_name"]
+            elif first_sig.get("name_attr"):
+                primary_signer = first_sig["name_attr"]
+            if pkcs.get("issuer_name") and pkcs["issuer_name"] != "Unknown":
+                primary_issuer = pkcs["issuer_name"]
+            if pkcs.get("serial_number"):
+                primary_serial = pkcs["serial_number"]
+            if first_sig.get("signing_time"):
+                primary_time = first_sig["signing_time"]
+            if pkcs.get("not_after"):
+                primary_expiry = pkcs["not_after"]
+                cert_is_expired = pkcs.get("is_expired", False)
             if first_sig.get("reason"):
                 details["signature_reason"] = first_sig["reason"]
             if first_sig.get("location"):
                 details["signature_location"] = first_sig["location"]
 
-        # Overlay PyHanko results if richer
+        # Priority 3: PyHanko results
         if pyhanko_sigs:
             first_py = pyhanko_sigs[0]
             if first_py.get("signer_cn") and first_py["signer_cn"] != "Unknown":
@@ -300,6 +351,7 @@ async def validate_pdf_document(file_path: str) -> Dict[str, Any]:
             result["overall_status"] = "WARNING"
 
         details["signatures_found"] = signatures_found_list
+        details["raw_scan_results"] = raw_scan_results
         details["pyhanko_signatures"] = pyhanko_sigs
 
     else:
