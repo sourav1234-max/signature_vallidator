@@ -389,7 +389,7 @@ async def download_report(
             headers={
                 "Content-Disposition": f"attachment; filename=Verified_{report.document.filename}"
             }
-        )       )
+        )
 
     rep_dict = {
         "id": report.id,
