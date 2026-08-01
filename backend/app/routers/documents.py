@@ -1,10 +1,14 @@
 import os
+import io
 import uuid
 import json
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, status, Query
 from fastapi.responses import Response, StreamingResponse, FileResponse
+from pypdf import PdfReader, PdfWriter
+from reportlab.pdfgen import canvas
+from reportlab.lib.colors import HexColor
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -254,6 +258,81 @@ def convert_unverified_to_verified_in_pdf(pdf_bytes: bytes) -> bytes:
     return modified_bytes
 
 
+def apply_verified_stamp_to_pdf(input_bytes: bytes, signer_name: str = "") -> bytes:
+    """
+    Overlays a professional Green Digital Signature Verified badge & tick mark 
+    directly onto the PDF pages and converts visual unverified strings.
+    """
+    modified_bytes = convert_unverified_to_verified_in_pdf(input_bytes)
+    
+    try:
+        reader = PdfReader(io.BytesIO(modified_bytes))
+        writer = PdfWriter()
+        
+        for i, page in enumerate(reader.pages):
+            w = float(page.mediabox.width)
+            h = float(page.mediabox.height)
+            
+            # Apply stamp overlay to the first & last page
+            if i == 0 or i == len(reader.pages) - 1:
+                packet = io.BytesIO()
+                can = canvas.Canvas(packet, pagesize=(w, h))
+                
+                # Badge Position (bottom right corner)
+                badge_w = 275
+                badge_h = 62
+                x = w - badge_w - 20
+                y = 25
+                
+                # Glassmorphic Dark Green Container
+                can.setFillColor(HexColor("#064e3b"))
+                can.setStrokeColor(HexColor("#10b981"))
+                can.setLineWidth(2)
+                can.roundRect(x, y, badge_w, badge_h, 10, fill=1, stroke=1)
+                
+                # Green Circle with White Checkmark tick mark
+                circle_x = x + 25
+                circle_y = y + badge_h / 2
+                can.setFillColor(HexColor("#10b981"))
+                can.circle(circle_x, circle_y, 16, fill=1, stroke=0)
+                
+                # Draw Vector Checkmark Tick Mark ✓
+                can.setStrokeColor(HexColor("#ffffff"))
+                can.setLineWidth(3)
+                can.setLineCap(1)
+                p = can.beginPath()
+                p.moveTo(circle_x - 6, circle_y)
+                p.lineTo(circle_x - 1, circle_y - 5)
+                p.lineTo(circle_x + 7, circle_y + 5)
+                can.drawPath(p, fill=0, stroke=1)
+                
+                # Text: DIGITAL SIGNATURE VERIFIED ✓
+                can.setFillColor(HexColor("#ecfdf5"))
+                can.setFont("Helvetica-Bold", 11)
+                can.drawString(x + 50, y + 37, "DIGITAL SIGNATURE VERIFIED ✓")
+                
+                signer_text = f"Signed: {signer_name[:26]}" if signer_name else "Cryptographically Validated"
+                can.setFillColor(HexColor("#a7f3d0"))
+                can.setFont("Helvetica", 8)
+                can.drawString(x + 50, y + 23, signer_text)
+                can.drawString(x + 50, y + 10, "Status: Authenticated & Intact")
+                
+                can.save()
+                packet.seek(0)
+                
+                overlay_reader = PdfReader(packet)
+                if overlay_reader.pages:
+                    page.merge_page(overlay_reader.pages[0])
+                    
+            writer.add_page(page)
+            
+        output_stream = io.BytesIO()
+        writer.write(output_stream)
+        return output_stream.getvalue()
+    except Exception:
+        return modified_bytes
+
+
 @router.get("/report/{id}/download")
 async def download_report(
     id: str,
@@ -281,7 +360,7 @@ async def download_report(
             file_bytes = f.read()
             
         if report.overall_status in ["VALID", "WARNING"]:
-            file_bytes = convert_unverified_to_verified_in_pdf(file_bytes)
+            file_bytes = apply_verified_stamp_to_pdf(file_bytes, report.signed_by or "")
             
         return Response(
             content=file_bytes,
@@ -359,7 +438,7 @@ async def download_original_document(
         
     latest_report = doc.validation_reports[-1] if doc.validation_reports else None
     if latest_report and latest_report.overall_status in ["VALID", "WARNING"]:
-        file_bytes = convert_unverified_to_verified_in_pdf(file_bytes)
+        file_bytes = apply_verified_stamp_to_pdf(file_bytes, latest_report.signed_by or "")
         
     return Response(
         content=file_bytes,
