@@ -14,13 +14,13 @@ import {
   Key,
   UserCheck,
   Clock,
-  ExternalLink,
   Layers,
   Hash,
   Sparkles,
-  ChevronDown,
-  ChevronUp
+  RefreshCw,
+  FileSignature
 } from "lucide-react";
+import { AdobePdfViewer } from "./AdobePdfViewer";
 
 interface ValidationResultCardProps {
   report: ValidationReportType;
@@ -28,58 +28,22 @@ interface ValidationResultCardProps {
 }
 
 export const ValidationResultCard: React.FC<ValidationResultCardProps> = ({ report, onReset }) => {
-  const [showRawDetails, setShowRawDetails] = useState(false);
-
   const isPass = report.overall_status === "VALID";
   const isWarn = report.overall_status === "WARNING";
   const isFail = report.overall_status === "INVALID";
-
-  const badgeBg = isPass
-    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-glow-valid"
-    : isWarn
-    ? "bg-amber-500/10 text-amber-400 border-amber-500/30 shadow-glow-warning"
-    : "bg-rose-500/10 text-rose-400 border-rose-500/30 shadow-glow-invalid";
-
-  const StatusIcon = isPass ? CheckCircle2 : isWarn ? AlertTriangle : XCircle;
 
   const reportId = report.id || report.report_id || report.document_id;
   const qrUrl = typeof window !== "undefined" ? `${window.location.origin}/report/${reportId}` : `https://validator.domain/report/${reportId}`;
 
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-6 animate-fade-in">
-      {/* Header Banner */}
-      <div className={`p-6 sm:p-8 rounded-3xl border glass-panel relative overflow-hidden ${badgeBg}`}>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative z-10">
-          <div className="flex items-center gap-4">
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border ${badgeBg}`}>
-              <StatusIcon className="w-8 h-8" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-2xl font-extrabold tracking-tight">OVERALL RESULT: {report.overall_status}</span>
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase border ${badgeBg}`}>
-                  {report.trust_status || report.overall_status}
-                </span>
-              </div>
-              <p className="text-sm text-slate-300 mt-1">
-                Validated in <span className="font-mono text-cyan-300 font-semibold">{report.validation_time_ms} ms</span> • SHA-256 Verified
-              </p>
-            </div>
-          </div>
+    <div className="w-full max-w-5xl mx-auto space-y-8 animate-fade-in">
+      {/* 1. Main Adobe Acrobat Interactive PDF Viewer with Signature Banner & Panel */}
+      <AdobePdfViewer report={report} />
 
-          <button
-            onClick={onReset}
-            className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-200 transition"
-          >
-            Validate Another PDF
-          </button>
-        </div>
-      </div>
-
-      {/* Main Grid: Checklist & Signer Attributes */}
+      {/* 2. Cryptographic Audit Summary & Downloads Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Summary Checklist */}
-        <div className="lg:col-span-1 glass-card p-6 rounded-3xl border border-slate-800 space-y-4">
+        {/* Left Column: Summary Checklist & QR Seal */}
+        <div className="lg:col-span-1 glass-card p-6 rounded-3xl border border-slate-800 space-y-5">
           <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-cyan-400" />
             Verification Summary
@@ -98,11 +62,11 @@ export const ValidationResultCard: React.FC<ValidationResultCardProps> = ({ repo
                 >
                   <span className="font-medium">{item.label}</span>
                   {item.status === "PASS" ? (
-                    <span className="font-bold flex items-center gap-1 text-emerald-400">
+                    <span className="font-bold flex items-center gap-1 text-emerald-400 shrink-0">
                       <CheckCircle2 className="w-3.5 h-3.5" /> PASS
                     </span>
                   ) : (
-                    <span className="font-bold flex items-center gap-1 text-rose-400">
+                    <span className="font-bold flex items-center gap-1 text-rose-400 shrink-0">
                       <XCircle className="w-3.5 h-3.5" /> FAIL
                     </span>
                   )}
@@ -123,13 +87,20 @@ export const ValidationResultCard: React.FC<ValidationResultCardProps> = ({ repo
               <Sparkles className="w-3 h-3" /> Official Audit QR Code
             </span>
           </div>
+
+          <button
+            onClick={onReset}
+            className="w-full py-2.5 px-4 text-xs font-bold rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 transition flex items-center justify-center gap-2"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Validate Another PDF
+          </button>
         </div>
 
-        {/* Right Column: Key Validation Attributes */}
+        {/* Right Column: Key Technical Audit Attributes & Downloads */}
         <div className="lg:col-span-2 glass-card p-6 sm:p-8 rounded-3xl border border-slate-800 space-y-6">
           <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
             <Layers className="w-4 h-4 text-cyan-400" />
-            Technical Audit Details
+            Technical Cryptographic Audit
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -151,7 +122,7 @@ export const ValidationResultCard: React.FC<ValidationResultCardProps> = ({ repo
             <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
               <span className="text-slate-400 block mb-1">Digital Signature Present</span>
               <span className={`font-bold text-sm ${report.signature_found ? "text-emerald-400" : "text-rose-400"}`}>
-                {report.signature_found ? "Yes (Embedded Signature Found)" : "No (Missing Signature)"}
+                {report.signature_found ? "Yes (Embedded PKCS#7 / CMS)" : "No (Missing Signature)"}
               </span>
             </div>
 
@@ -174,7 +145,7 @@ export const ValidationResultCard: React.FC<ValidationResultCardProps> = ({ repo
             {/* Certificate Issuer */}
             <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 sm:col-span-2">
               <span className="text-slate-400 flex items-center gap-1.5 mb-1">
-                <Key className="w-3.5 h-3.5 text-indigo-400" /> Certificate Issuer (CA)
+                <Key className="w-3.5 h-3.5 text-indigo-400" /> Certificate Authority (CA Issuer)
               </span>
               <span className="font-medium text-slate-200 text-sm">{report.certificate_issuer || "N/A"}</span>
             </div>
@@ -256,3 +227,4 @@ export const ValidationResultCard: React.FC<ValidationResultCardProps> = ({ repo
     </div>
   );
 };
+

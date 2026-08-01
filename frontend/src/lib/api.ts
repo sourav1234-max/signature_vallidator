@@ -1,5 +1,31 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
+export interface SignatureType {
+  signature_id: string;
+  field_name: string;
+  signer_name: string;
+  signer_email?: string;
+  organization?: string;
+  organizational_unit?: string;
+  issuer_name: string;
+  serial_number: string;
+  signing_time: string;
+  not_before?: string;
+  not_after: string;
+  is_expired: boolean;
+  signature_algorithm: string;
+  hash_algorithm: string;
+  public_key_info: string;
+  byte_range?: number[];
+  document_modified: boolean;
+  signature_valid: boolean;
+  cert_valid: boolean;
+  ocsp_crl_status: string;
+  reason?: string;
+  location?: string;
+  trust_status: string;
+}
+
 export interface ValidationReportType {
   id?: string;
   report_id?: string;
@@ -12,6 +38,7 @@ export interface ValidationReportType {
   signature_found: boolean;
   signature_valid: boolean;
   document_modified: boolean;
+  cert_valid?: boolean;
   signed_by?: string;
   certificate_issuer?: string;
   certificate_serial?: string;
@@ -19,6 +46,7 @@ export interface ValidationReportType {
   certificate_expiry?: string;
   trust_status?: string;
   validation_time_ms: number;
+  signatures?: SignatureType[];
   summary_checklist: Array<{ status: "PASS" | "FAIL"; label: string }>;
   validation_details: any;
   created_at: string;
@@ -140,4 +168,8 @@ export async function loginUser(email: string, password: string) {
 
 export function getDownloadUrl(reportId: string, format: "pdf" | "json" | "csv" | "original") {
   return `${API_BASE}/report/${reportId}/download?format=${format}`;
+}
+
+export function getRawDocumentUrl(docId: string) {
+  return `${API_BASE}/document/${docId}/raw`;
 }
