@@ -138,6 +138,6 @@ export async function loginUser(email: string, password: string) {
   return response.json();
 }
 
-export function getDownloadUrl(reportId: string, format: "pdf" | "json" | "csv") {
+export function getDownloadUrl(reportId: string, format: "pdf" | "json" | "csv" | "original") {
   return `${API_BASE}/report/${reportId}/download?format=${format}`;
 }

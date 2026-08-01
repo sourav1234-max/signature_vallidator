@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, status, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -235,7 +235,7 @@ async def get_validation_report(id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/report/{id}/download")
 async def download_report(
     id: str,
-    format: str = Query("pdf", regex="^(pdf|json|csv)$"),
+    format: str = Query("pdf", regex="^(pdf|json|csv|original)$"),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(
@@ -250,6 +250,15 @@ async def download_report(
         
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+
+    if format == "original":
+        if not report.document or not os.path.exists(report.document.file_path):
+            raise HTTPException(status_code=404, detail="Original document file not found")
+        return FileResponse(
+            path=report.document.file_path,
+            filename=report.document.filename,
+            media_type="application/pdf"
+        )
 
     rep_dict = {
         "id": report.id,
@@ -302,6 +311,23 @@ async def download_report(
                 "Content-Disposition": f"attachment; filename=Validation_Report_{report.id[:8]}.csv"
             }
         )
+
+
+@router.get("/document/{id}/download")
+async def download_original_document(
+    id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(select(Document).where(Document.id == id))
+    doc = result.scalars().first()
+    if not doc or not os.path.exists(doc.file_path):
+        raise HTTPException(status_code=404, detail="Original document file not found")
+        
+    return FileResponse(
+        path=doc.file_path,
+        filename=doc.filename,
+        media_type="application/pdf"
+    )
 
 
 @router.get("/history")

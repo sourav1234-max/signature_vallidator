@@ -212,15 +212,24 @@ export const ValidationResultCard: React.FC<ValidationResultCardProps> = ({ repo
 
           {/* Download Buttons Section */}
           <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <span className="text-xs font-semibold text-slate-400">Download Reports:</span>
+            <span className="text-xs font-semibold text-slate-400">Download Options:</span>
             <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={getDownloadUrl(reportId, "original")}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-lg shadow-emerald-600/20"
+              >
+                <Download className="w-4 h-4" /> Download Original PDF
+              </a>
+
               <a
                 href={getDownloadUrl(reportId, "pdf")}
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs transition shadow-lg shadow-cyan-600/20"
               >
-                <FileText className="w-4 h-4" /> PDF Certificate
+                <FileText className="w-4 h-4" /> Audit Certificate
               </a>
 
               <a
