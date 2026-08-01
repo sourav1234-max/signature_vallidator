@@ -119,14 +119,14 @@ export async function getAdminLogs(token: string) {
   return response.json();
 }
 
-export async function loginUser(email: string, password: str) {
+export async function loginUser(email: string, password: string) {
   const body = new URLSearchParams();
   body.append("username", email);
   body.append("password", password);
 
   const response = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-length-encoded", "Content-Type": "application/x-www-form-urlencoded" },
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
   });
 
