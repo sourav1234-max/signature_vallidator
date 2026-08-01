@@ -158,13 +158,13 @@ export const AdobePdfViewer: React.FC<AdobePdfViewerProps> = ({ report }) => {
           </button>
 
           <a
-            href={getDownloadUrl(reportId, "original")}
+            href={getDownloadUrl(reportId, "verified")}
             target="_blank"
             rel="noreferrer"
             className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 transition shadow-sm"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Download Verified PDF</span>
+            <span>Download Verified PDF (2nd PDF)</span>
           </a>
         </div>
       </div>

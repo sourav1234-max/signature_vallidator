@@ -242,15 +242,15 @@ async def get_validation_report(id: str, db: AsyncSession = Depends(get_db)):
 
 def generate_verified_preview_pdf(input_bytes: bytes, signer_name: str = "") -> bytes:
     """
-    Directly transforms stream text and overlays a precise Adobe Acrobat Signature Verified 
-    stamp (Green Checkmark ✓ + Signature Verified) directly over the original signature box.
+    Directly transforms stream text and overlays a precise Signature Valid 
+    stamp (Green Checkmark ✓ + 'Signature valid' header) matching the official e-District verified PDF format.
     """
     replacements = [
-        (b"Signature Not Verified", b"Signature Verified    "),
-        (b"Signature not verified", b"Signature verified    "),
-        (b"SIGNATURE NOT VERIFIED", b"SIGNATURE VERIFIED    "),
-        (b"Signature Not Validated", b"Signature Validated    "),
-        (b"5369676e6174757265204e6f74205665726966696564", b"5369676e617475726520566572696669656420202020"),
+        (b"Signature Not Verified", b"Signature valid       "),
+        (b"Signature not verified", b"Signature valid       "),
+        (b"SIGNATURE NOT VERIFIED", b"SIGNATURE VALID       "),
+        (b"Signature Not Validated", b"Signature valid        "),
+        (b"5369676e6174757265204e6f74205665726966696564", b"5369676e61747572652076616c696420202020202020"),
     ]
     
     modified_bytes = input_bytes
@@ -269,36 +269,34 @@ def generate_verified_preview_pdf(input_bytes: bytes, signer_name: str = "") -> 
             packet = io.BytesIO()
             can = canvas.Canvas(packet, pagesize=(w, h))
             
-            # Signature block area coordinates (top of signature box area)
-            # Cover the "Signature Not Verified ?" line directly
+            # Position for the Signature valid header line & green checkmark
+            # Standard bottom-right signature box area on e-District PDFs (page 1)
             box_w = 210
-            box_h = 24
-            x = w - box_w - 70
-            y = 120
+            box_h = 25
+            x = w - box_w - 65
+            y = 118
             
-            # White mask background to hide the yellow ? and 'Signature Not Verified'
+            # White mask patch covering "Signature Not Verified" line & yellow ? icon area
             can.setFillColor(HexColor("#ffffff"))
-            can.rect(x, y, box_w, box_h, fill=1, stroke=0)
+            can.rect(x - 5, y - 2, box_w + 10, box_h + 4, fill=1, stroke=0)
             
-            # Green Circle with White Vector Checkmark Tick Mark ✓
-            circle_x = x + 12
-            circle_y = y + 12
-            can.setFillColor(HexColor("#10b981"))
-            can.circle(circle_x, circle_y, 9, fill=1, stroke=0)
+            # Draw "Signature valid" text in black bold font (matching 2nd PDF image)
+            can.setFillColor(HexColor("#000000"))
+            can.setFont("Helvetica-Bold", 13)
+            can.drawString(x + 2, y + 6, "Signature valid")
             
-            can.setStrokeColor(HexColor("#ffffff"))
-            can.setLineWidth(2)
-            can.setLineCap(1)
+            # Green Vector Checkmark Tick Mark ✓ (slashing across/behind signature box area)
+            can.setStrokeColor(HexColor("#16a34a")) # Vibrant e-Gov Green
+            can.setLineWidth(3.5)
+            can.setLineCap(1) # Round line end caps
+            can.setLineJoin(1) # Round join
+            
+            # Draw the ✓ tick mark
             p = can.beginPath()
-            p.moveTo(circle_x - 3, circle_y)
-            p.lineTo(circle_x - 1, circle_y - 3)
-            p.lineTo(circle_x + 4, circle_y + 3)
+            p.moveTo(x + 130, y + 8)
+            p.lineTo(x + 142, y + 1)
+            p.lineTo(x + 172, y + 34)
             can.drawPath(p, fill=0, stroke=1)
-            
-            # Draw Green Verified Header: "Signature Verified ✓"
-            can.setFillColor(HexColor("#047857"))
-            can.setFont("Helvetica-Bold", 11)
-            can.drawString(x + 26, y + 6, "Signature Verified ✓")
             
             can.save()
             packet.seek(0)
@@ -345,7 +343,7 @@ async def get_raw_document(
 @router.get("/report/{id}/download")
 async def download_report(
     id: str,
-    format: str = Query("pdf", regex="^(pdf|json|csv|original)$"),
+    format: str = Query("verified", regex="^(pdf|json|csv|original|verified)$"),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(
@@ -367,14 +365,31 @@ async def download_report(
         
         with open(report.document.file_path, "rb") as f:
             file_bytes = f.read()
-            
+        
         return Response(
             content=file_bytes,
-            media_type="application/pdf",
+            media_type="attachment; filename=" + report.document.filename,
             headers={
                 "Content-Disposition": f"attachment; filename={report.document.filename}"
             }
         )
+
+    if format == "verified":
+        if not report.document or not os.path.exists(report.document.file_path):
+            raise HTTPException(status_code=404, detail="Document file not found")
+        
+        with open(report.document.file_path, "rb") as f:
+            file_bytes = f.read()
+            
+        file_bytes = generate_verified_preview_pdf(file_bytes, report.signed_by or "")
+        
+        return Response(
+            content=file_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=Verified_{report.document.filename}"
+            }
+        )       )
 
     rep_dict = {
         "id": report.id,

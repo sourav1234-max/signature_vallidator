@@ -186,21 +186,30 @@ export const ValidationResultCard: React.FC<ValidationResultCardProps> = ({ repo
             <span className="text-xs font-semibold text-slate-400">Download Options:</span>
             <div className="flex flex-wrap items-center gap-2">
               <a
+                href={getDownloadUrl(reportId, "verified")}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shadow-lg shadow-emerald-600/20"
+              >
+                <Download className="w-4 h-4" /> Download Verified PDF (2nd PDF)
+              </a>
+
+              <a
                 href={getDownloadUrl(reportId, "original")}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-lg shadow-emerald-600/20"
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 font-medium text-xs transition"
               >
-                <Download className="w-4 h-4" /> Download Original PDF
+                <FileText className="w-4 h-4 text-cyan-400" /> Original PDF (1st PDF)
               </a>
 
               <a
                 href={getDownloadUrl(reportId, "pdf")}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs transition shadow-lg shadow-cyan-600/20"
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 font-medium text-xs transition"
               >
-                <FileText className="w-4 h-4" /> Audit Certificate
+                <FileText className="w-4 h-4 text-amber-400" /> Audit Certificate
               </a>
 
               <a
