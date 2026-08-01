@@ -242,8 +242,8 @@ async def get_validation_report(id: str, db: AsyncSession = Depends(get_db)):
 
 def generate_verified_preview_pdf(input_bytes: bytes, signer_name: str = "") -> bytes:
     """
-    Transforms visual 'Signature Not Verified' text in PDF stream to 'Signature Verified'
-    and overlays an Adobe Acrobat style Green Checkmark Tick Mark (✓) badge on preview pages.
+    Directly transforms stream text and overlays a precise Adobe Acrobat Signature Verified 
+    stamp (Green Checkmark ✓ + Signature Verified) directly over the original signature box.
     """
     replacements = [
         (b"Signature Not Verified", b"Signature Verified    "),
@@ -266,47 +266,39 @@ def generate_verified_preview_pdf(input_bytes: bytes, signer_name: str = "") -> 
             w = float(page.mediabox.width)
             h = float(page.mediabox.height)
             
-            # Apply stamp overlay to page
             packet = io.BytesIO()
             can = canvas.Canvas(packet, pagesize=(w, h))
             
-            # Position: bottom right corner signature box
-            badge_w = 210
-            badge_h = 42
-            x = w - badge_w - 15
-            y = 15
+            # Signature block area coordinates (top of signature box area)
+            # Cover the "Signature Not Verified ?" line directly
+            box_w = 210
+            box_h = 24
+            x = w - box_w - 70
+            y = 120
             
-            # Dark Emerald Green Container
-            can.setFillColor(HexColor("#064e3b"))
-            can.setStrokeColor(HexColor("#10b981"))
-            can.setLineWidth(1.5)
-            can.roundRect(x, y, badge_w, badge_h, 8, fill=1, stroke=1)
+            # White mask background to hide the yellow ? and 'Signature Not Verified'
+            can.setFillColor(HexColor("#ffffff"))
+            can.rect(x, y, box_w, box_h, fill=1, stroke=0)
             
-            # Green Circle with White Checkmark tick mark ✓
-            circle_x = x + 20
-            circle_y = y + badge_h / 2
+            # Green Circle with White Vector Checkmark Tick Mark ✓
+            circle_x = x + 12
+            circle_y = y + 12
             can.setFillColor(HexColor("#10b981"))
-            can.circle(circle_x, circle_y, 12, fill=1, stroke=0)
+            can.circle(circle_x, circle_y, 9, fill=1, stroke=0)
             
-            # Draw Vector Checkmark Tick Mark ✓
             can.setStrokeColor(HexColor("#ffffff"))
-            can.setLineWidth(2.5)
+            can.setLineWidth(2)
             can.setLineCap(1)
             p = can.beginPath()
-            p.moveTo(circle_x - 4, circle_y)
-            p.lineTo(circle_x - 1, circle_y - 4)
-            p.lineTo(circle_x + 5, circle_y + 4)
+            p.moveTo(circle_x - 3, circle_y)
+            p.lineTo(circle_x - 1, circle_y - 3)
+            p.lineTo(circle_x + 4, circle_y + 3)
             can.drawPath(p, fill=0, stroke=1)
             
-            # Text: SIGNATURE VERIFIED ✓
-            can.setFillColor(HexColor("#ecfdf5"))
-            can.setFont("Helvetica-Bold", 9)
-            can.drawString(x + 38, y + 24, "SIGNATURE VERIFIED ✓")
-            
-            signer_disp = f"Signed: {signer_name[:20]}" if signer_name else "Cryptographically Validated"
-            can.setFillColor(HexColor("#a7f3d0"))
-            can.setFont("Helvetica", 7.5)
-            can.drawString(x + 38, y + 11, signer_disp)
+            # Draw Green Verified Header: "Signature Verified ✓"
+            can.setFillColor(HexColor("#047857"))
+            can.setFont("Helvetica-Bold", 11)
+            can.drawString(x + 26, y + 6, "Signature Verified ✓")
             
             can.save()
             packet.seek(0)
