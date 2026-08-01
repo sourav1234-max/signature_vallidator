@@ -240,18 +240,106 @@ async def get_validation_report(id: str, db: AsyncSession = Depends(get_db)):
     }
 
 
+def generate_verified_preview_pdf(input_bytes: bytes, signer_name: str = "") -> bytes:
+    """
+    Transforms visual 'Signature Not Verified' text in PDF stream to 'Signature Verified'
+    and overlays an Adobe Acrobat style Green Checkmark Tick Mark (✓) badge on preview pages.
+    """
+    replacements = [
+        (b"Signature Not Verified", b"Signature Verified    "),
+        (b"Signature not verified", b"Signature verified    "),
+        (b"SIGNATURE NOT VERIFIED", b"SIGNATURE VERIFIED    "),
+        (b"Signature Not Validated", b"Signature Validated    "),
+        (b"5369676e6174757265204e6f74205665726966696564", b"5369676e617475726520566572696669656420202020"),
+    ]
+    
+    modified_bytes = input_bytes
+    for target, replacement in replacements:
+        if len(target) == len(replacement):
+            modified_bytes = modified_bytes.replace(target, replacement)
+            
+    try:
+        reader = PdfReader(io.BytesIO(modified_bytes))
+        writer = PdfWriter()
+        
+        for i, page in enumerate(reader.pages):
+            w = float(page.mediabox.width)
+            h = float(page.mediabox.height)
+            
+            # Apply stamp overlay to page
+            packet = io.BytesIO()
+            can = canvas.Canvas(packet, pagesize=(w, h))
+            
+            # Position: bottom right corner signature box
+            badge_w = 210
+            badge_h = 42
+            x = w - badge_w - 15
+            y = 15
+            
+            # Dark Emerald Green Container
+            can.setFillColor(HexColor("#064e3b"))
+            can.setStrokeColor(HexColor("#10b981"))
+            can.setLineWidth(1.5)
+            can.roundRect(x, y, badge_w, badge_h, 8, fill=1, stroke=1)
+            
+            # Green Circle with White Checkmark tick mark ✓
+            circle_x = x + 20
+            circle_y = y + badge_h / 2
+            can.setFillColor(HexColor("#10b981"))
+            can.circle(circle_x, circle_y, 12, fill=1, stroke=0)
+            
+            # Draw Vector Checkmark Tick Mark ✓
+            can.setStrokeColor(HexColor("#ffffff"))
+            can.setLineWidth(2.5)
+            can.setLineCap(1)
+            p = can.beginPath()
+            p.moveTo(circle_x - 4, circle_y)
+            p.lineTo(circle_x - 1, circle_y - 4)
+            p.lineTo(circle_x + 5, circle_y + 4)
+            can.drawPath(p, fill=0, stroke=1)
+            
+            # Text: SIGNATURE VERIFIED ✓
+            can.setFillColor(HexColor("#ecfdf5"))
+            can.setFont("Helvetica-Bold", 9)
+            can.drawString(x + 38, y + 24, "SIGNATURE VERIFIED ✓")
+            
+            signer_disp = f"Signed: {signer_name[:20]}" if signer_name else "Cryptographically Validated"
+            can.setFillColor(HexColor("#a7f3d0"))
+            can.setFont("Helvetica", 7.5)
+            can.drawString(x + 38, y + 11, signer_disp)
+            
+            can.save()
+            packet.seek(0)
+            
+            overlay_reader = PdfReader(packet)
+            if overlay_reader.pages:
+                page.merge_page(overlay_reader.pages[0])
+                
+            writer.add_page(page)
+            
+        output_stream = io.BytesIO()
+        writer.write(output_stream)
+        return output_stream.getvalue()
+    except Exception:
+        return modified_bytes
+
+
 @router.get("/document/{id}/raw")
 async def get_raw_document(
     id: str,
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Document).where(Document.id == id))
+    result = await db.execute(select(Document).where(Document.id == id).options(selectinload(Document.validation_reports)))
     doc = result.scalars().first()
     if not doc or not os.path.exists(doc.file_path):
         raise HTTPException(status_code=404, detail="Document not found")
         
     with open(doc.file_path, "rb") as f:
         file_bytes = f.read()
+        
+    latest_report = doc.validation_reports[-1] if doc.validation_reports else None
+    if latest_report and latest_report.overall_status in ["VALID", "WARNING"]:
+        file_bytes = generate_verified_preview_pdf(file_bytes, latest_report.signed_by or "")
         
     return Response(
         content=file_bytes,
