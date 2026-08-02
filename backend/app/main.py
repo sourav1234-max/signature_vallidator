@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.db.database import init_db, AsyncSessionLocal
 from app.db.models import User
 from app.core.security import get_password_hash
-from app.routers import auth, documents, admin
+from app.routers import auth, documents, admin, document_editor, ai_scanner
 from sqlalchemy.future import select
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
@@ -72,6 +72,8 @@ app.add_middleware(
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(documents.router, prefix=settings.API_V1_STR)
 app.include_router(admin.router, prefix=settings.API_V1_STR)
+app.include_router(document_editor.router, prefix=settings.API_V1_STR)
+app.include_router(ai_scanner.router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():
