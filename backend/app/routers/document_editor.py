@@ -64,19 +64,14 @@ async def process_image(
             
         # 2. Signature Tools (ink color conversion & transparent bg)
         if signature_ink:
-            # Convert to grayscale first to evaluate intensity
             gray = image.convert("L")
-            # Create mask for ink (dark pixels)
             threshold = 200
             mask = gray.point(lambda p: 255 if p < threshold else 0)
             
-            # Select target ink RGB
             ink_rgb = (0, 0, 0) if signature_ink == "black" else (0, 45, 150) # Dark Blue
             
             new_img = Image.new("RGBA", image.size, (255, 255, 255, 0) if bg_color == "transparent" else (255, 255, 255, 255))
-            draw = ImageDraw.Draw(new_img)
             
-            # Apply colored ink mask
             for x in range(image.width):
                 for y in range(image.height):
                     if mask.getpixel((x, y)) > 0:
@@ -97,16 +92,15 @@ async def process_image(
             else:
                 target_bg = (255, 255, 255)
 
-            # High-threshold brightness mask for background replacement
             if image.mode != "RGBA":
                 image = image.convert("RGBA")
                 
             bg_layer = Image.new("RGBA", image.size, target_bg + (255,))
-            # Replace whitish or near-transparent background
             for x in range(image.width):
                 for y in range(image.height):
                     r, g, b, a = image.getpixel((x, y))
-                    if a < 50 or (r > 230 and g > 230 and b > 230):
+                    # Retain non-background pixels
+                    if a < 50 or (r > 220 and g > 220 and b > 220):
                         pass
                     else:
                         bg_layer.putpixel((x, y), (r, g, b, 255))
@@ -117,7 +111,6 @@ async def process_image(
             image = image.convert("L").convert("RGB")
         else:
             if image.mode == "RGBA" and output_format.upper() in ("JPG", "JPEG"):
-                # Composite onto white background for JPEG export
                 bg = Image.new("RGB", image.size, (255, 255, 255))
                 bg.paste(image, mask=image.split()[3] if "A" in image.mode else None)
                 image = bg
@@ -137,7 +130,7 @@ async def process_image(
             image = enhancer.enhance(sharpness)
 
         # 5. Dimensions Resizing
-        if target_width and target_height:
+        if target_width and target_height and target_width > 0 and target_height > 0:
             image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
         # 6. Output format normalization & DPI metadata
@@ -157,10 +150,8 @@ async def process_image(
         buf = io.BytesIO()
         
         if target_kb and target_kb > 0 and fmt == "JPEG":
-            # Binary search for optimal quality percentage
             low_q, high_q = 5, 98
-            best_buf = None
-            best_size = 0
+            best_data = None
             
             while low_q <= high_q:
                 mid_q = (low_q + high_q) // 2
@@ -169,34 +160,46 @@ async def process_image(
                 size_kb = temp_buf.tell() / 1024.0
                 
                 if size_kb <= target_kb:
-                    best_buf = temp_buf
-                    best_size = size_kb
-                    low_q = mid_q + 1 # try higher quality
+                    best_data = temp_buf.getvalue()
+                    low_q = mid_q + 1
                 else:
-                    high_q = mid_q - 1 # try lower quality
+                    high_q = mid_q - 1
                     
-            if best_buf is not None:
-                buf = best_buf
+            if best_data is not None:
+                buf = io.BytesIO(best_data)
             else:
                 image.save(buf, format=fmt, quality=10, dpi=dpi_val)
         else:
             image.save(buf, format=fmt, quality=90, dpi=dpi_val)
 
-        # Min KB padding (if size is below minimum required KB)
+        # 8. Uncorrupted Min KB Padding via valid JPEG COM (Comment) Segment
         if min_kb and min_kb > 0:
-            current_kb = buf.tell() / 1024.0
-            if current_kb < min_kb:
-                needed_bytes = int((min_kb - current_kb) * 1024)
-                # Append safe zero padding comment block in JPEG EXIF/APP section
-                buf.write(b'\x00' * needed_bytes)
+            current_bytes = len(buf.getvalue())
+            min_target_bytes = int(min_kb * 1024)
+            needed_bytes = min_target_bytes - current_bytes
+            
+            if needed_bytes > 0:
+                data = buf.getvalue()
+                if fmt == "JPEG":
+                    eoi_idx = data.rfind(b'\xff\xd9')
+                    if eoi_idx != -1:
+                        # Construct valid JPEG COM segment (0xFF 0xFE + length + padding payload)
+                        comment_len = needed_bytes
+                        if comment_len > 4:
+                            length_header = (comment_len).to_bytes(2, byteorder='big')
+                            comment_segment = b'\xff\xfe' + length_header + (b'DocReadyPad' * (comment_len // 11 + 1))[:comment_len-2]
+                            data = data[:eoi_idx] + comment_segment + data[eoi_idx:]
+                            buf = io.BytesIO(data)
 
         buf.seek(0)
+        final_bytes = buf.getvalue()
         media_type = "image/jpeg" if fmt == "JPEG" else f"image/{fmt.lower()}"
-        return StreamingResponse(buf, media_type=media_type, headers={
+        
+        return StreamingResponse(io.BytesIO(final_bytes), media_type=media_type, headers={
             "Content-Disposition": f'attachment; filename="docready_processed.{fmt.lower()}"',
             "X-Processed-Width": str(image.width),
             "X-Processed-Height": str(image.height),
-            "X-Processed-Size-KB": f"{buf.getbuffer().nbytes / 1024.0:.2f}"
+            "X-Processed-Size-KB": f"{len(final_bytes) / 1024.0:.2f}"
         })
 
     except Exception as e:

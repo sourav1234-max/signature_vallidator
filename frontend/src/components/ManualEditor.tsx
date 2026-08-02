@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { EditorSidebar } from "./EditorSidebar";
 import { ValidationPanel } from "./ValidationPanel";
 import {
@@ -14,7 +14,8 @@ import {
   Eye,
   Sliders,
   CheckCircle2,
-  FileText
+  FileText,
+  Sparkles
 } from "lucide-react";
 
 interface ManualEditorProps {
@@ -38,7 +39,7 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
 
   // File size states
   const [targetKb, setTargetKb] = useState(50);
-  const [minKb, setMinKb] = useState(20);
+  const [minKb, setMinKb] = useState(0);
   const [quality, setQuality] = useState(90);
   const [compressionLevel, setCompressionLevel] = useState("balanced");
 
@@ -63,9 +64,13 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentResultSizeKb, setCurrentResultSizeKb] = useState(0);
 
+  // Track if user explicitly selected a template vs uploading image
+  const [isCustomTemplateApplied, setIsCustomTemplateApplied] = useState(false);
+
   // Apply pre-loaded government template if selected
   useEffect(() => {
     if (selectedTemplateObj && selectedTemplateObj.id !== "custom") {
+      setIsCustomTemplateApplied(true);
       if (selectedTemplateObj.width_px) setWidthPx(selectedTemplateObj.width_px);
       if (selectedTemplateObj.height_px) setHeightPx(selectedTemplateObj.height_px);
       if (selectedTemplateObj.width_cm) setWidthCm(selectedTemplateObj.width_cm);
@@ -80,6 +85,7 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
     }
   }, [selectedTemplateObj]);
 
+  // Handle File Upload and Auto-Detect Real Image Dimensions & Size
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -87,17 +93,39 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
     const url = URL.createObjectURL(file);
     setSourcePreviewUrl(url);
     setProcessedUrl(url);
-    setCurrentResultSizeKb(file.size / 1024.0);
+
+    const actualSizeKb = file.size / 1024.0;
+    setCurrentResultSizeKb(actualSizeKb);
+
+    // Read real image natural width & height
+    const img = new Image();
+    img.onload = () => {
+      if (!isCustomTemplateApplied) {
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+        setWidthPx(w);
+        setHeightPx(h);
+        const cmW = parseFloat(((w / dpi) * 2.54).toFixed(2));
+        const cmH = parseFloat(((h / dpi) * 2.54).toFixed(2));
+        setWidthCm(cmW);
+        setHeightCm(cmH);
+        setWidthMm(parseFloat((cmW * 10).toFixed(1)));
+        setHeightMm(parseFloat((cmH * 10).toFixed(1)));
+        setTargetKb(Math.round(actualSizeKb));
+      }
+    };
+    img.src = url;
   };
 
-  const handleApplyChanges = async () => {
+  // Core Processing Function
+  const handleApplyChanges = useCallback(async () => {
     if (!sourceFile) return;
     setIsProcessing(true);
 
     const formData = new FormData();
     formData.append("file", sourceFile);
-    formData.append("target_width", widthPx.toString());
-    formData.append("target_height", heightPx.toString());
+    if (widthPx > 0) formData.append("target_width", widthPx.toString());
+    if (heightPx > 0) formData.append("target_height", heightPx.toString());
     formData.append("dpi", dpi.toString());
     if (targetKb > 0) formData.append("target_kb", targetKb.toString());
     if (minKb > 0) formData.append("min_kb", minKb.toString());
@@ -127,7 +155,44 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [
+    sourceFile,
+    widthPx,
+    heightPx,
+    dpi,
+    targetKb,
+    minKb,
+    outputFormat,
+    bgColor,
+    signatureInk,
+    brightness,
+    contrast,
+    sharpness,
+    grayscale
+  ]);
+
+  // Live Auto-Update Debounce Effect (300ms)
+  useEffect(() => {
+    if (!sourceFile) return;
+    const timer = setTimeout(() => {
+      handleApplyChanges();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [
+    widthPx,
+    heightPx,
+    targetKb,
+    minKb,
+    quality,
+    bgColor,
+    brightness,
+    contrast,
+    sharpness,
+    grayscale,
+    signatureInk,
+    dpi,
+    outputFormat
+  ]);
 
   const handleReset = () => {
     if (sourcePreviewUrl) {
@@ -230,7 +295,7 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
           {processedUrl && (
             <a
               href={processedUrl}
-              download={`docready_output.${outputFormat.toLowerCase()}`}
+              download={`docready_processed.${outputFormat.toLowerCase()}`}
               className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-green-600/20"
             >
               <Download className="w-4 h-4" />
@@ -239,7 +304,7 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
           )}
         </div>
 
-        {/* Studio Viewport */}
+        {/* Studio Viewport with Live CSS Filters & Processed Stream */}
         <div className="flex-1 min-h-[420px] bg-slate-900/60 border border-slate-800/80 rounded-2xl flex items-center justify-center relative overflow-hidden p-6 shadow-inner">
           {!sourcePreviewUrl ? (
             <label className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-2xl p-10 flex flex-col items-center justify-center cursor-pointer transition-colors bg-slate-950/60">
@@ -276,6 +341,9 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
                       src={processedUrl || sourcePreviewUrl}
                       alt="Processed"
                       className="max-h-[460px] object-contain max-w-none"
+                      style={{
+                        filter: `brightness(${brightness}) contrast(${contrast}) ${grayscale ? "grayscale(100%)" : ""}`
+                      }}
                     />
                   </div>
                   {/* Split Handle */}
@@ -297,12 +365,21 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
                   </div>
                 </div>
               ) : (
-                <div className="rounded-xl border border-slate-700 shadow-2xl overflow-hidden bg-slate-950 p-2">
+                <div className="rounded-xl border border-slate-700 shadow-2xl overflow-hidden bg-slate-950 p-2 relative">
                   <img
                     src={processedUrl || sourcePreviewUrl}
-                    alt="Preview"
-                    className="max-h-[460px] object-contain"
+                    alt="Live Preview"
+                    className="max-h-[460px] object-contain transition-all"
+                    style={{
+                      filter: `brightness(${brightness}) contrast(${contrast}) ${grayscale ? "grayscale(100%)" : ""}`
+                    }}
                   />
+                  {isProcessing && (
+                    <div className="absolute top-3 right-3 bg-blue-600/90 text-white text-[10px] font-bold px-2 py-1 rounded-md flex items-center space-x-1 shadow-md">
+                      <Sparkles className="w-3 h-3 animate-spin" />
+                      <span>Updating...</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
