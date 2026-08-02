@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { EditorSidebar } from "./EditorSidebar";
 import { ValidationPanel } from "./ValidationPanel";
+import { CropModal } from "./CropModal";
 import { processImageOnCanvas, ImageProcessingOptions } from "@/lib/canvasProcessor";
 import {
   Upload,
@@ -18,7 +19,8 @@ import {
   FileText,
   Sparkles,
   FlipHorizontal,
-  FlipVertical
+  FlipVertical,
+  Scissors
 } from "lucide-react";
 
 interface ManualEditorProps {
@@ -32,6 +34,10 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
   const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string | null>(null);
   const [processedUrl, setProcessedUrl] = useState<string | null>(null);
   const [processedBlob, setProcessedBlob] = useState<Blob | null>(null);
+
+  // Manual Crop Rect & Modal
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+  const [cropRect, setCropRect] = useState<{ x: number; y: number; width: number; height: number } | undefined>(undefined);
 
   // Dimension states
   const [widthPx, setWidthPx] = useState(413);
@@ -129,6 +135,8 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
     if (!sourceImageElement) return;
     setIsProcessing(true);
 
+    const isPassportMode = selectedTemplateObj?.doc_type === "photo" || activeTab === "passport";
+
     const opts: ImageProcessingOptions = {
       widthPx,
       heightPx,
@@ -146,6 +154,8 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
       minKb,
       format: outputFormat,
       dpi,
+      cropRect,
+      isPassportTopCrop: isPassportMode && !cropRect,
     };
 
     try {
@@ -176,6 +186,9 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
     minKb,
     outputFormat,
     dpi,
+    cropRect,
+    selectedTemplateObj,
+    activeTab
   ]);
 
   // Trigger Live Preview on ANY option change immediately!
@@ -201,6 +214,7 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
     minKb,
     outputFormat,
     dpi,
+    cropRect,
     renderLiveCanvasPreview,
   ]);
 
@@ -218,10 +232,11 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
     setRotateAngle(0);
     setFlipH(false);
     setFlipV(false);
+    setCropRect(undefined);
   };
 
   const handleDownload = () => {
-    if (!processedUrl) return;
+    if (!processedUrl || !processedBlob) return;
     const a = document.createElement("a");
     a.href = processedUrl;
     a.download = `docready_processed.${outputFormat.toLowerCase()}`;
@@ -268,6 +283,7 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
         setSharpness={setSharpness}
         grayscale={grayscale}
         setGrayscale={setGrayscale}
+        onOpenCropModal={() => setIsCropModalOpen(true)}
         signatureInk={signatureInk}
         setSignatureInk={setSignatureInk}
         dpi={dpi}
@@ -302,6 +318,17 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
             </button>
 
             <div className="h-4 w-px bg-slate-800 mx-1"></div>
+
+            {/* Manual Crop Button */}
+            {sourcePreviewUrl && (
+              <button
+                onClick={() => setIsCropModalOpen(true)}
+                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold border border-blue-400 shadow-md shadow-blue-600/30"
+              >
+                <Scissors className="w-3.5 h-3.5" />
+                <span>Manual Passport Crop</span>
+              </button>
+            )}
 
             {/* Rotations & Flips */}
             <button
@@ -359,7 +386,7 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
               className="px-5 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold text-xs flex items-center space-x-2 shadow-lg shadow-green-600/20 cursor-pointer"
             >
               <Download className="w-4 h-4" />
-              <span>Download File ({currentResultSizeKb.toFixed(1)} KB)</span>
+              <span>Download File ({outputFormat} • {currentResultSizeKb.toFixed(1)} KB)</span>
             </button>
           )}
         </div>
@@ -451,6 +478,16 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
           templateName={selectedTemplateObj?.name}
         />
       </main>
+
+      {/* Manual Crop Modal */}
+      {sourcePreviewUrl && (
+        <CropModal
+          isOpen={isCropModalOpen}
+          onClose={() => setIsCropModalOpen(false)}
+          imageSrc={sourcePreviewUrl}
+          onApplyCrop={(rect) => setCropRect(rect)}
+        />
+      )}
     </div>
   );
 };

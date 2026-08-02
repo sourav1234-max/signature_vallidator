@@ -57,6 +57,7 @@ interface EditorSidebarProps {
   setSharpness: (v: number) => void;
   grayscale: boolean;
   setGrayscale: (v: boolean) => void;
+  onOpenCropModal?: () => void;
   // Signature Tools
   signatureInk: string;
   setSignatureInk: (v: string) => void;
@@ -107,6 +108,7 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
   setSharpness,
   grayscale,
   setGrayscale,
+  onOpenCropModal,
   signatureInk,
   setSignatureInk,
   dpi,
@@ -146,6 +148,28 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
     const cm = parseFloat(((val / dpi) * 2.54).toFixed(2));
     setHeightCm(cm);
     setHeightMm(parseFloat((cm * 10).toFixed(1)));
+    if (lockAspectRatio && widthPx > 0 && heightPx > 0) {
+      // Automatic width scaling based on height (Passport 3.5:4.5 ratio)
+      const ratio = widthPx / heightPx;
+      const newWPx = Math.round(val * ratio);
+      setWidthPx(newWPx);
+      const newWCm = parseFloat(((newWPx / dpi) * 2.54).toFixed(2));
+      setWidthCm(newWCm);
+      setWidthMm(parseFloat((newWCm * 10).toFixed(1)));
+    }
+  };
+
+  const applyPassportPreset = () => {
+    const h = 531;
+    const w = Math.round(h * (3.5 / 4.5)); // 413 px
+    setHeightPx(h);
+    setWidthPx(w);
+    const cmW = 3.5;
+    const cmH = 4.5;
+    setWidthCm(cmW);
+    setHeightCm(cmH);
+    setWidthMm(35.0);
+    setHeightMm(45.0);
   };
 
   return (
@@ -257,10 +281,7 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
               <label className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider">Presets</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => {
-                    handleWidthPxChange(413);
-                    handleHeightPxChange(531);
-                  }}
+                  onClick={applyPassportPreset}
                   className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-[11px] font-medium text-slate-200 border border-slate-700 text-left"
                 >
                   📸 Passport (3.5x4.5cm)
@@ -352,7 +373,18 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
         {/* 3. PASSPORT & PHOTO TAB */}
         {activeTab === "passport" && (
           <div className="space-y-5">
-            <h3 className="font-bold text-sm text-white">Passport Photo & Background Tools</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm text-white">Passport Photo & Background Tools</h3>
+              {onOpenCropModal && (
+                <button
+                  onClick={onOpenCropModal}
+                  className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold flex items-center space-x-1 shadow-md shadow-blue-600/30"
+                >
+                  <Scissors className="w-3 h-3" />
+                  <span>Manual Crop</span>
+                </button>
+              )}
+            </div>
 
             {/* Background Color Replace */}
             <div className="space-y-2">
@@ -393,6 +425,18 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
                 >
                   Original
                 </button>
+              </div>
+
+              {/* Custom Color Picker */}
+              <div className="flex items-center space-x-2 pt-1">
+                <span className="text-[10px] text-slate-400">Custom Color:</span>
+                <input
+                  type="color"
+                  value={bgColor.startsWith("#") ? bgColor : "#FFFFFF"}
+                  onChange={(e) => setBgColor(e.target.value)}
+                  className="w-8 h-8 rounded border border-slate-700 cursor-pointer bg-transparent"
+                />
+                <span className="text-[10px] font-mono text-slate-300">{bgColor}</span>
               </div>
             </div>
 
