@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { EditorSidebar } from "./EditorSidebar";
 import { ValidationPanel } from "./ValidationPanel";
+import { processImageOnCanvas, ImageProcessingOptions } from "@/lib/canvasProcessor";
 import {
   Upload,
   RotateCcw,
@@ -15,7 +16,9 @@ import {
   Sliders,
   CheckCircle2,
   FileText,
-  Sparkles
+  Sparkles,
+  FlipHorizontal,
+  FlipVertical
 } from "lucide-react";
 
 interface ManualEditorProps {
@@ -25,8 +28,10 @@ interface ManualEditorProps {
 export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj }) => {
   const [activeTab, setActiveTab] = useState("dimensions");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [sourceImageElement, setSourceImageElement] = useState<HTMLImageElement | null>(null);
   const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string | null>(null);
   const [processedUrl, setProcessedUrl] = useState<string | null>(null);
+  const [processedBlob, setProcessedBlob] = useState<Blob | null>(null);
 
   // Dimension states
   const [widthPx, setWidthPx] = useState(413);
@@ -36,6 +41,9 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
   const [widthMm, setWidthMm] = useState(35.0);
   const [heightMm, setHeightMm] = useState(45.0);
   const [lockAspectRatio, setLockAspectRatio] = useState(true);
+  const [rotateAngle, setRotateAngle] = useState(0);
+  const [flipH, setFlipH] = useState(false);
+  const [flipV, setFlipV] = useState(false);
 
   // File size states
   const [targetKb, setTargetKb] = useState(50);
@@ -63,8 +71,6 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
   const [sliderPos, setSliderPos] = useState(50);
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentResultSizeKb, setCurrentResultSizeKb] = useState(0);
-
-  // Track if user explicitly selected a template vs uploading image
   const [isCustomTemplateApplied, setIsCustomTemplateApplied] = useState(false);
 
   // Apply pre-loaded government template if selected
@@ -97,9 +103,10 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
     const actualSizeKb = file.size / 1024.0;
     setCurrentResultSizeKb(actualSizeKb);
 
-    // Read real image natural width & height
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.onload = () => {
+      setSourceImageElement(img);
       if (!isCustomTemplateApplied) {
         const w = img.naturalWidth;
         const h = img.naturalHeight;
@@ -117,81 +124,84 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
     img.src = url;
   };
 
-  // Core Processing Function
-  const handleApplyChanges = useCallback(async () => {
-    if (!sourceFile) return;
+  // Instant Live Canvas Processing Engine (Runs in <5ms locally)
+  const renderLiveCanvasPreview = useCallback(async () => {
+    if (!sourceImageElement) return;
     setIsProcessing(true);
 
-    const formData = new FormData();
-    formData.append("file", sourceFile);
-    if (widthPx > 0) formData.append("target_width", widthPx.toString());
-    if (heightPx > 0) formData.append("target_height", heightPx.toString());
-    formData.append("dpi", dpi.toString());
-    if (targetKb > 0) formData.append("target_kb", targetKb.toString());
-    if (minKb > 0) formData.append("min_kb", minKb.toString());
-    formData.append("output_format", outputFormat);
-    if (bgColor !== "none") formData.append("bg_color", bgColor);
-    if (signatureInk) formData.append("signature_ink", signatureInk);
-    formData.append("brightness", brightness.toString());
-    formData.append("contrast", contrast.toString());
-    formData.append("sharpness", sharpness.toString());
-    if (grayscale) formData.append("grayscale", "true");
+    const opts: ImageProcessingOptions = {
+      widthPx,
+      heightPx,
+      rotateAngle,
+      flipH,
+      flipV,
+      brightness,
+      contrast,
+      sharpness,
+      grayscale,
+      bgColor,
+      signatureInk,
+      quality,
+      targetKb,
+      minKb,
+      format: outputFormat,
+      dpi,
+    };
 
     try {
-      const res = await fetch("http://localhost:8000/api/v1/editor/process-image", {
-        method: "POST",
-        body: formData,
-      });
-      if (res.ok) {
-        const sizeHeader = res.headers.get("X-Processed-Size-KB");
-        if (sizeHeader) setCurrentResultSizeKb(parseFloat(sizeHeader));
-        
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        setProcessedUrl(url);
-      }
+      const res = await processImageOnCanvas(sourceImageElement, opts);
+      setProcessedUrl(res.dataUrl);
+      setProcessedBlob(res.blob);
+      setCurrentResultSizeKb(res.sizeKb);
     } catch (err) {
-      console.error("Failed to process edits:", err);
+      console.error("Canvas processing error:", err);
     } finally {
       setIsProcessing(false);
     }
   }, [
-    sourceFile,
+    sourceImageElement,
     widthPx,
     heightPx,
-    dpi,
-    targetKb,
-    minKb,
-    outputFormat,
-    bgColor,
-    signatureInk,
-    brightness,
-    contrast,
-    sharpness,
-    grayscale
-  ]);
-
-  // Live Auto-Update Debounce Effect (300ms)
-  useEffect(() => {
-    if (!sourceFile) return;
-    const timer = setTimeout(() => {
-      handleApplyChanges();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [
-    widthPx,
-    heightPx,
-    targetKb,
-    minKb,
-    quality,
-    bgColor,
+    rotateAngle,
+    flipH,
+    flipV,
     brightness,
     contrast,
     sharpness,
     grayscale,
+    bgColor,
     signatureInk,
+    quality,
+    targetKb,
+    minKb,
+    outputFormat,
     dpi,
-    outputFormat
+  ]);
+
+  // Trigger Live Preview on ANY option change immediately!
+  useEffect(() => {
+    if (sourceImageElement) {
+      renderLiveCanvasPreview();
+    }
+  }, [
+    sourceImageElement,
+    widthPx,
+    heightPx,
+    rotateAngle,
+    flipH,
+    flipV,
+    brightness,
+    contrast,
+    sharpness,
+    grayscale,
+    bgColor,
+    signatureInk,
+    quality,
+    targetKb,
+    minKb,
+    outputFormat,
+    dpi,
+    renderLiveCanvasPreview,
   ]);
 
   const handleReset = () => {
@@ -205,6 +215,19 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
     setGrayscale(false);
     setBgColor("none");
     setSignatureInk("");
+    setRotateAngle(0);
+    setFlipH(false);
+    setFlipV(false);
+  };
+
+  const handleDownload = () => {
+    if (!processedUrl) return;
+    const a = document.createElement("a");
+    a.href = processedUrl;
+    a.download = `docready_processed.${outputFormat.toLowerCase()}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   return (
@@ -251,7 +274,7 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
         setDpi={setDpi}
         outputFormat={outputFormat}
         setOutputFormat={setOutputFormat}
-        onApplyChanges={handleApplyChanges}
+        onApplyChanges={renderLiveCanvasPreview}
         onReset={handleReset}
         isProcessing={isProcessing}
       />
@@ -261,6 +284,7 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
         {/* Workspace Toolbar */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs shadow-md">
           <div className="flex items-center space-x-2">
+            {/* Zoom Controls */}
             <button
               onClick={() => setZoom((z) => Math.max(25, z - 25))}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
@@ -279,6 +303,43 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
 
             <div className="h-4 w-px bg-slate-800 mx-1"></div>
 
+            {/* Rotations & Flips */}
+            <button
+              onClick={() => setRotateAngle((r) => (r - 90) % 360)}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+              title="Rotate Left 90°"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setRotateAngle((r) => (r + 90) % 360)}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+              title="Rotate Right 90°"
+            >
+              <RotateCw className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setFlipH(!flipH)}
+              className={`p-1.5 rounded-lg border transition-all ${
+                flipH ? "bg-blue-600 text-white border-blue-400" : "bg-slate-800 text-slate-300 border-slate-700"
+              }`}
+              title="Flip Horizontal"
+            >
+              <FlipHorizontal className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setFlipV(!flipV)}
+              className={`p-1.5 rounded-lg border transition-all ${
+                flipV ? "bg-blue-600 text-white border-blue-400" : "bg-slate-800 text-slate-300 border-slate-700"
+              }`}
+              title="Flip Vertical"
+            >
+              <FlipVertical className="w-4 h-4" />
+            </button>
+
+            <div className="h-4 w-px bg-slate-800 mx-1"></div>
+
+            {/* Before / After Toggle */}
             <button
               onClick={() => setShowComparison(!showComparison)}
               className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
@@ -293,18 +354,17 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
           </div>
 
           {processedUrl && (
-            <a
-              href={processedUrl}
-              download={`docready_processed.${outputFormat.toLowerCase()}`}
-              className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-green-600/20"
+            <button
+              onClick={handleDownload}
+              className="px-5 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold text-xs flex items-center space-x-2 shadow-lg shadow-green-600/20 cursor-pointer"
             >
               <Download className="w-4 h-4" />
-              <span>Download File</span>
-            </a>
+              <span>Download File ({currentResultSizeKb.toFixed(1)} KB)</span>
+            </button>
           )}
         </div>
 
-        {/* Studio Viewport with Live CSS Filters & Processed Stream */}
+        {/* Studio Viewport */}
         <div className="flex-1 min-h-[420px] bg-slate-900/60 border border-slate-800/80 rounded-2xl flex items-center justify-center relative overflow-hidden p-6 shadow-inner">
           {!sourcePreviewUrl ? (
             <label className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-2xl p-10 flex flex-col items-center justify-center cursor-pointer transition-colors bg-slate-950/60">
@@ -326,13 +386,11 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
               {/* Normal or Split Comparison View */}
               {showComparison && sourcePreviewUrl ? (
                 <div className="relative overflow-hidden rounded-xl border border-slate-700 shadow-2xl max-h-[460px]">
-                  {/* Before Image */}
                   <img
                     src={sourcePreviewUrl}
                     alt="Original"
                     className="max-h-[460px] object-contain"
                   />
-                  {/* After Image overlay */}
                   <div
                     className="absolute inset-0 overflow-hidden"
                     style={{ width: `${sliderPos}%` }}
@@ -341,12 +399,8 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
                       src={processedUrl || sourcePreviewUrl}
                       alt="Processed"
                       className="max-h-[460px] object-contain max-w-none"
-                      style={{
-                        filter: `brightness(${brightness}) contrast(${contrast}) ${grayscale ? "grayscale(100%)" : ""}`
-                      }}
                     />
                   </div>
-                  {/* Split Handle */}
                   <input
                     type="range"
                     min="0"
@@ -368,16 +422,13 @@ export const ManualEditor: React.FC<ManualEditorProps> = ({ selectedTemplateObj 
                 <div className="rounded-xl border border-slate-700 shadow-2xl overflow-hidden bg-slate-950 p-2 relative">
                   <img
                     src={processedUrl || sourcePreviewUrl}
-                    alt="Live Preview"
+                    alt="Live Photo Preview"
                     className="max-h-[460px] object-contain transition-all"
-                    style={{
-                      filter: `brightness(${brightness}) contrast(${contrast}) ${grayscale ? "grayscale(100%)" : ""}`
-                    }}
                   />
                   {isProcessing && (
                     <div className="absolute top-3 right-3 bg-blue-600/90 text-white text-[10px] font-bold px-2 py-1 rounded-md flex items-center space-x-1 shadow-md">
                       <Sparkles className="w-3 h-3 animate-spin" />
-                      <span>Updating...</span>
+                      <span>Live Updating...</span>
                     </div>
                   )}
                 </div>
